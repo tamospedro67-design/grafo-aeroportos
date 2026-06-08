@@ -5,34 +5,21 @@
 #define TAM_NOME 100
 #define TAM_CIDADE 60
 
-/*
- * Um grafo e uma estrutura formada por vertices e arestas.
- * Neste trabalho, cada vertice representa um aeroporto e cada aresta
- * representa uma rota aerea de um aeroporto para outro.
- */
-
+/* Representa um aeroporto, que sera um vertice do grafo. */
 typedef struct {
-    char codigo[TAM_CODIGO];   /* Sigla do aeroporto, por exemplo: GRU */
+    char codigo[TAM_CODIGO];
     char nome[TAM_NOME];
     char cidade[TAM_CIDADE];
 } Aeroporto;
 
-/*
- * Cada NoRota e uma celula de uma lista encadeada.
- * Ele representa uma coluna preenchida da matriz esparsa, ou seja,
- * uma rota que realmente existe.
- */
-typedef struct NoRota {
-    int destino;
-    int distanciaKm;
-    struct NoRota *proximo;
-} NoRota;
+#include "esparsa.h"
 
+/* Guarda todos os aeroportos e as rotas em formato de matriz esparsa. */
 typedef struct {
-    Aeroporto *aeroportos;
-    NoRota **matrizEsparsa;
-    int quantidade;
-    int capacidade;
+    Aeroporto *aeroportos;       /* vetor com os aeroportos cadastrados */
+    NoRota **matrizEsparsa;      /* cada posicao aponta para a lista de rotas */
+    int quantidade;              /* total de aeroportos cadastrados */
+    int capacidade;              /* limite maximo de aeroportos */
 } Grafo;
 
 Grafo *criarGrafo(int capacidade);

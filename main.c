@@ -10,6 +10,7 @@
 static void limparBufferEntrada(void) {
     int c;
 
+    /* Remove caracteres que ficaram no teclado apos uma leitura. */
     while ((c = getchar()) != '\n' && c != EOF) {
     }
 }
@@ -27,6 +28,7 @@ static void lerTexto(const char *mensagem, char *destino, int tamanho) {
     encontrouQuebra = (strchr(destino, '\n') != NULL);
     destino[strcspn(destino, "\n")] = '\0';
 
+    /* Se o usuario digitou mais do que cabia no vetor, descarta o restante. */
     if (!encontrouQuebra) {
         limparBufferEntrada();
     }
@@ -63,6 +65,7 @@ int main(void) {
     Grafo *grafo;
     int opcao;
 
+    /* Cria o grafo e carrega alguns aeroportos para demonstracao. */
     grafo = criarGrafo(CAPACIDADE_MAXIMA);
     if (grafo == NULL) {
         printf("Erro ao criar o grafo.\n");
@@ -72,6 +75,7 @@ int main(void) {
     carregarDadosExemplo(grafo);
 
     do {
+        /* Repete o menu ate o usuario escolher a opcao de sair. */
         mostrarMenu();
         opcao = lerInteiro("Escolha uma opcao: ");
 

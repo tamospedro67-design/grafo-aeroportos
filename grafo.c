@@ -1,29 +1,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "grafo.h"
 
 static void copiarTexto(char *destino, const char *origem, int tamanho) {
+    /* Copia o texto sem deixar passar do tamanho do vetor. */
     strncpy(destino, origem, tamanho - 1);
     destino[tamanho - 1] = '\0';
 }
 
-/*
- * Cria o grafo de aeroportos.
- *
- * A matriz e esparsa porque, em um sistema real, nem todo aeroporto possui
- * rota direta para todos os outros aeroportos. Guardar uma matriz completa
- * gastaria memoria com muitas posicoes vazias.
- *
- * Por isso, cada linha da matriz e uma lista encadeada:
- * - a posicao i do vetor representa o aeroporto de origem i;
- * - cada no da lista representa uma coluna preenchida, isto e, uma rota
- *   existente saindo desse aeroporto.
- */
+static int normalizarCodigoAeroporto(const char *codigo, char codigoNormalizado[TAM_CODIGO]) {
+    int i;
+
+    if (codigo == NULL || strlen(codigo) != 3) {
+        return 0;
+    }
+
+    for (i = 0; i < 3; i++) {
+        unsigned char caractere = (unsigned char) codigo[i];
+
+        if (!isalpha(caractere)) {
+            return 0;
+        }
+
+        codigoNormalizado[i] = (char) toupper(caractere);
+    }
+
+    codigoNormalizado[3] = '\0';
+    return 1;
+}
+
 Grafo *criarGrafo(int capacidade) {
     Grafo *grafo;
-    int i;
 
     if (capacidade <= 0) {
         return NULL;
@@ -35,11 +45,11 @@ Grafo *criarGrafo(int capacidade) {
     }
 
     grafo->aeroportos = (Aeroporto *) malloc(sizeof(Aeroporto) * capacidade);
-    grafo->matrizEsparsa = (NoRota **) malloc(sizeof(NoRota *) * capacidade);
+    grafo->matrizEsparsa = criarMatrizEsparsa(capacidade);
 
     if (grafo->aeroportos == NULL || grafo->matrizEsparsa == NULL) {
         free(grafo->aeroportos);
-        free(grafo->matrizEsparsa);
+        liberarMatrizEsparsa(grafo->matrizEsparsa, 0);
         free(grafo);
         return NULL;
     }
@@ -47,37 +57,22 @@ Grafo *criarGrafo(int capacidade) {
     grafo->quantidade = 0;
     grafo->capacidade = capacidade;
 
-    for (i = 0; i < capacidade; i++) {
-        grafo->matrizEsparsa[i] = NULL;
-    }
-
     return grafo;
 }
 
 void liberarGrafo(Grafo *grafo) {
-    int i;
-
     if (grafo == NULL) {
         return;
     }
 
-    for (i = 0; i < grafo->quantidade; i++) {
-        NoRota *atual = grafo->matrizEsparsa[i];
-
-        while (atual != NULL) {
-            NoRota *remover = atual;
-            atual = atual->proximo;
-            free(remover);
-        }
-    }
-
-    free(grafo->matrizEsparsa);
+    liberarMatrizEsparsa(grafo->matrizEsparsa, grafo->quantidade);
     free(grafo->aeroportos);
     free(grafo);
 }
 
 int adicionarAeroporto(Grafo *grafo, const char *codigo, const char *nome, const char *cidade) {
     Aeroporto *aeroporto;
+    char codigoNormalizado[TAM_CODIGO];
 
     if (grafo == NULL || codigo == NULL || nome == NULL || cidade == NULL) {
         return 0;
@@ -88,18 +83,19 @@ int adicionarAeroporto(Grafo *grafo, const char *codigo, const char *nome, const
         return 0;
     }
 
-    if (strlen(codigo) != 3) {
+    if (!normalizarCodigoAeroporto(codigo, codigoNormalizado)) {
         printf("Codigo invalido. Use exatamente 3 letras, como GRU.\n");
         return 0;
     }
 
-    if (buscarAeroportoPorCodigo(grafo, codigo) != -1) {
-        printf("Ja existe aeroporto com o codigo %s.\n", codigo);
+    if (buscarAeroportoPorCodigo(grafo, codigoNormalizado) != -1) {
+        printf("Ja existe aeroporto com o codigo %s.\n", codigoNormalizado);
         return 0;
     }
 
+    /* O novo aeroporto entra na primeira posicao livre do vetor. */
     aeroporto = &grafo->aeroportos[grafo->quantidade];
-    copiarTexto(aeroporto->codigo, codigo, TAM_CODIGO);
+    copiarTexto(aeroporto->codigo, codigoNormalizado, TAM_CODIGO);
     copiarTexto(aeroporto->nome, nome, TAM_NOME);
     copiarTexto(aeroporto->cidade, cidade, TAM_CIDADE);
 
@@ -109,13 +105,19 @@ int adicionarAeroporto(Grafo *grafo, const char *codigo, const char *nome, const
 
 int buscarAeroportoPorCodigo(Grafo *grafo, const char *codigo) {
     int i;
+    char codigoNormalizado[TAM_CODIGO];
 
     if (grafo == NULL || codigo == NULL) {
         return -1;
     }
 
+    if (!normalizarCodigoAeroporto(codigo, codigoNormalizado)) {
+        return -1;
+    }
+
+    /* Procura o codigo comparando com cada aeroporto ja cadastrado. */
     for (i = 0; i < grafo->quantidade; i++) {
-        if (strcmp(grafo->aeroportos[i].codigo, codigo) == 0) {
+        if (strcmp(grafo->aeroportos[i].codigo, codigoNormalizado) == 0) {
             return i;
         }
     }
@@ -126,8 +128,7 @@ int buscarAeroportoPorCodigo(Grafo *grafo, const char *codigo) {
 int adicionarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDestino, int distanciaKm) {
     int origem;
     int destino;
-    NoRota *atual;
-    NoRota *novaRota;
+    int distanciaAnterior;
 
     if (grafo == NULL || codigoOrigem == NULL || codigoDestino == NULL) {
         return 0;
@@ -138,6 +139,7 @@ int adicionarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDest
         return 0;
     }
 
+    /* Converte os codigos informados para os indices usados internamente. */
     origem = buscarAeroportoPorCodigo(grafo, codigoOrigem);
     destino = buscarAeroportoPorCodigo(grafo, codigoDestino);
 
@@ -151,26 +153,15 @@ int adicionarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDest
         return 0;
     }
 
-    atual = grafo->matrizEsparsa[origem];
-    while (atual != NULL) {
-        if (atual->destino == destino) {
-            atual->distanciaKm = distanciaKm;
-            printf("Rota ja existia. Distancia atualizada.\n");
-            return 1;
-        }
-        atual = atual->proximo;
-    }
-
-    novaRota = (NoRota *) malloc(sizeof(NoRota));
-    if (novaRota == NULL) {
+    distanciaAnterior = buscarNaMatrizEsparsa(grafo->matrizEsparsa, origem, destino);
+    if (!inserirNaMatrizEsparsa(grafo->matrizEsparsa, origem, destino, distanciaKm)) {
         printf("Erro de memoria ao adicionar rota.\n");
         return 0;
     }
 
-    novaRota->destino = destino;
-    novaRota->distanciaKm = distanciaKm;
-    novaRota->proximo = grafo->matrizEsparsa[origem];
-    grafo->matrizEsparsa[origem] = novaRota;
+    if (distanciaAnterior > 0) {
+        printf("Rota ja existia. Distancia atualizada.\n");
+    }
 
     return 1;
 }
@@ -178,8 +169,6 @@ int adicionarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDest
 int removerRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDestino) {
     int origem;
     int destino;
-    NoRota *atual;
-    NoRota *anterior = NULL;
 
     if (grafo == NULL || codigoOrigem == NULL || codigoDestino == NULL) {
         return 0;
@@ -193,21 +182,8 @@ int removerRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDestin
         return 0;
     }
 
-    atual = grafo->matrizEsparsa[origem];
-    while (atual != NULL) {
-        if (atual->destino == destino) {
-            if (anterior == NULL) {
-                grafo->matrizEsparsa[origem] = atual->proximo;
-            } else {
-                anterior->proximo = atual->proximo;
-            }
-
-            free(atual);
-            return 1;
-        }
-
-        anterior = atual;
-        atual = atual->proximo;
+    if (removerDaMatrizEsparsa(grafo->matrizEsparsa, origem, destino)) {
+        return 1;
     }
 
     printf("Rota nao encontrada.\n");
@@ -217,7 +193,6 @@ int removerRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDestin
 int verificarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDestino) {
     int origem;
     int destino;
-    NoRota *atual;
 
     if (grafo == NULL || codigoOrigem == NULL || codigoDestino == NULL) {
         return 0;
@@ -230,15 +205,7 @@ int verificarRota(Grafo *grafo, const char *codigoOrigem, const char *codigoDest
         return 0;
     }
 
-    atual = grafo->matrizEsparsa[origem];
-    while (atual != NULL) {
-        if (atual->destino == destino) {
-            return atual->distanciaKm;
-        }
-        atual = atual->proximo;
-    }
-
-    return 0;
+    return buscarNaMatrizEsparsa(grafo->matrizEsparsa, origem, destino);
 }
 
 void listarAeroportos(Grafo *grafo) {
@@ -255,6 +222,7 @@ void listarAeroportos(Grafo *grafo) {
 
     printf("\nAeroportos cadastrados:\n");
     for (i = 0; i < grafo->quantidade; i++) {
+        /* O indice mostrado e o mesmo usado internamente pelo grafo. */
         printf("%d - %s | %s | %s\n",
                i,
                grafo->aeroportos[i].codigo,
@@ -273,6 +241,7 @@ void listarRotas(Grafo *grafo) {
 
     printf("\nRotas cadastradas:\n");
     for (i = 0; i < grafo->quantidade; i++) {
+        /* Cada linha da matriz esparsa e uma lista de rotas da mesma origem. */
         NoRota *atual = grafo->matrizEsparsa[i];
 
         while (atual != NULL) {
@@ -303,6 +272,7 @@ void imprimirMatrizEsparsa(Grafo *grafo) {
     for (i = 0; i < grafo->quantidade; i++) {
         NoRota *atual = grafo->matrizEsparsa[i];
 
+        /* Mostra somente as posicoes preenchidas da matriz. */
         printf("[%s] -> ", grafo->aeroportos[i].codigo);
 
         if (atual == NULL) {
@@ -325,11 +295,12 @@ void carregarDadosExemplo(Grafo *grafo) {
         return;
     }
 
-    adicionarAeroporto(grafo, "GRU", "Aeroporto Internacional de Guarulhos", "S\303\243o Paulo");
+    /* Dados iniciais para testar o programa sem cadastrar tudo manualmente. */
+    adicionarAeroporto(grafo, "GRU", "Aeroporto Internacional de Guarulhos", "Sao Paulo");
     adicionarAeroporto(grafo, "VCP", "Aeroporto de Viracopos", "Campinas");
-    adicionarAeroporto(grafo, "CGH", "Aeroporto de Congonhas", "S\303\243o Paulo");
-    adicionarAeroporto(grafo, "GIG", "Aeroporto do Gale\303\243o", "Rio de Janeiro");
-    adicionarAeroporto(grafo, "BSB", "Aeroporto Internacional de Bras\303\255lia", "Bras\303\255lia");
+    adicionarAeroporto(grafo, "CGH", "Aeroporto de Congonhas", "Sao Paulo");
+    adicionarAeroporto(grafo, "GIG", "Aeroporto do Galeao", "Rio de Janeiro");
+    adicionarAeroporto(grafo, "BSB", "Aeroporto Internacional de Brasilia", "Brasilia");
 
     adicionarRota(grafo, "GRU", "VCP", 100);
     adicionarRota(grafo, "GRU", "GIG", 360);
